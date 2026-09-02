@@ -1,0 +1,16 @@
+name: release-check
+on:
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: Questetra BPM Suite のケース ID
+        required: true
+        type: string
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: テストの実行
+        run: npm ci && npm test
