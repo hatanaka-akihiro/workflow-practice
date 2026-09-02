@@ -1,4 +1,5 @@
 name: release-check
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,10 +12,27 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - name: 実行ログの URL を先に知らせる
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "${{ secrets.QUESTETRA_CHECK_URL }}?key=${{ secrets.QUESTETRA_API_KEY }}&processInstanceId=${{ inputs.case_id }}"; then
+              break
+            fi
+            echo "まだ受け取れないので 10 秒待ちます"
+            sleep 10
+          done
+          curl -sS --fail-with-body -X POST "${{ secrets.QUESTETRA_RECEIVE_URL }}" \
+            -d "key=${{ secrets.QUESTETRA_API_KEY }}" \
+            -d "processInstanceId=${{ inputs.case_id }}" \
+            -d "saveOnly=true" \
+            -d "q_log_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
       - uses: actions/checkout@v4
+
       - name: テストの実行
         run: echo "ここでビルドとテストを走らせます"
-　    - name: 結果を Questetra BPM Suite へ折り返す
+
+      - name: 結果を Questetra BPM Suite へ折り返す
         if: always()
         run: |
           for i in $(seq 1 30); do
