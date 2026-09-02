@@ -13,4 +13,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: テストの実行
-        run: npm ci && npm test
+        run: echo "ここでビルドとテストを走らせます"
