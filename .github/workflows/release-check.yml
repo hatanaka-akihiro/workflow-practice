@@ -14,3 +14,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: テストの実行
         run: echo "ここでビルドとテストを走らせます"
+　    - name: 結果を Questetra BPM Suite へ折り返す
+        if: always()
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "${{ secrets.QUESTETRA_CHECK_URL }}?key=${{ secrets.QUESTETRA_API_KEY }}&processInstanceId=${{ inputs.case_id }}"; then
+              break
+            fi
+            echo "まだ受け取れないので 10 秒待ちます"
+            sleep 10
+          done
+          curl -sS --fail-with-body -X POST "${{ secrets.QUESTETRA_RECEIVE_URL }}" \
+            -d "key=${{ secrets.QUESTETRA_API_KEY }}" \
+            -d "processInstanceId=${{ inputs.case_id }}" \
+            -d "q_result=${{ job.status }}"
