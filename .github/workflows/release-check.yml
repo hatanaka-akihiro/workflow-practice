@@ -1,5 +1,4 @@
 name: release-check
-
 on:
   workflow_dispatch:
     inputs:
@@ -7,42 +6,70 @@ on:
         description: Questetra BPM Suite のケース ID
         required: true
         type: string
+      api_key:
+        description: ［受信タスク (Webhook)］の API キー
+        required: true
+        type: string
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: 実行ログの URL を先に知らせる
+      - name: 受信タスクが受け取れる状態になるまで待つ
         run: |
           for i in $(seq 1 30); do
             if curl -sf "${{ secrets.QUESTETRA_CHECK_URL }}?key=${{ secrets.QUESTETRA_API_KEY }}&processInstanceId=${{ inputs.case_id }}"; then
-              break
+              exit 0
             fi
             echo "まだ受け取れないので 10 秒待ちます"
             sleep 10
           done
+          echo "受信タスクが受け取れる状態になりません"
+          exit 1
+      - name: 実行中であることを先に知らせる
+        run: |
           curl -sS --fail-with-body -X POST "${{ secrets.QUESTETRA_RECEIVE_URL }}" \
             -d "key=${{ secrets.QUESTETRA_API_KEY }}" \
             -d "processInstanceId=${{ inputs.case_id }}" \
             -d "saveOnly=true" \
+            -d "q_result=running" \
             -d "q_log_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
       - uses: actions/checkout@v4
-
       - name: テストの実行
         run: echo "ここでビルドとテストを走らせます"
-
       - name: 結果を Questetra BPM Suite へ折り返す
         if: always()
         run: |
-          for i in $(seq 1 30); do
-            if curl -sf "${{ secrets.QUESTETRA_CHECK_URL }}?key=${{ secrets.QUESTETRA_API_KEY }}&processInstanceId=${{ inputs.case_id }}"; then
-              break
-            fi
-            echo "まだ受け取れないので 10 秒待ちます"
-            sleep 10
-          done
           curl -sS --fail-with-body -X POST "${{ secrets.QUESTETRA_RECEIVE_URL }}" \
             -d "key=${{ secrets.QUESTETRA_API_KEY }}" \
             -d "processInstanceId=${{ inputs.case_id }}" \
             -d "q_result=${{ job.status }}"
+      - name: 問い合わせ先が受け取れる状態になるまで待つ
+        run: |
+          CALLBACK_URL="${{ secrets.QUESTETRA_WEBHOOK_URL }}/${{ inputs.case_id }}/${{ inputs.api_key }}/receive"
+          echo "CALLBACK_URL=$CALLBACK_URL" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf "$CALLBACK_URL/check"; then
+              exit 0
+            fi
+            echo "まだ受け取れないので 10 秒待ちます"
+            sleep 10
+          done
+          echo "受信タスクが受け取れる状態になりません"
+          exit 1
+      - name: リリース情報を問い合わせる
+        run: |
+          RESPONSE=$(curl -sS --fail-with-body -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"build_succeeded","repository":{"full_name":"${{ github.repository }}"},"workflow_run":{"id":${{ github.run_id }},"html_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}}')
+          echo "$RESPONSE" | jq -r .tag > release_tag.txt
+          echo "$RESPONSE" | jq -r .note > release_note.md
+      - name: ドラフトのリリースを作る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$(cat release_tag.txt)" --draft \
+            --title "$(cat release_tag.txt)" \
+            --notes-file release_note.md
